@@ -233,7 +233,7 @@ if __name__ == "__main__":
         # Overwrite the dataset samples and class list
         full_dataset.samples = filtered_samples
         full_dataset.classes = target_classes
-        loader = DataLoader(full_dataset, batch_size=32, shuffle=True)
+        loader = DataLoader(full_dataset, batch_size=16, shuffle=True)
         num_classes = len(full_dataset.classes)
     else:
         print(f"Warning: {DATA_PATH} not found. Falling back to mock data.")
@@ -241,12 +241,12 @@ if __name__ == "__main__":
         num_classes = 10
 
     # 3. Initialize Shortcut Model
-    model = ShortcutDiT(input_size=32, hidden_size=384, depth=4, num_heads=6, num_classes=num_classes).to(device)
+    model = ShortcutDiT(input_size=32, hidden_size=768, depth=12, num_heads=12, num_classes=num_classes).to(device)
     trainer = ShortcutTrainer(model, device)
 
     # 4. Training Loop
     print("Starting Training...")
-    for epoch in range(10):
+    for epoch in range(70):
         for i, (images, labels) in enumerate(loader):
             images = images.to(device)
 
@@ -256,8 +256,19 @@ if __name__ == "__main__":
             loss = trainer.train_step(latents, labels)
             if i % 5 == 0:
                 print(f"Epoch {epoch}, Batch {i}, Loss: {loss:.4f}")
-            if i % 1000 == 0:
-                torch.save(trainer.model_ema.state_dict(), f"checkpoint_{i}.pt")
+
+        model.eval()  # Set to eval mode for sampling
+        with torch.no_grad():
+            # Sample 4 images (128-step for best quality)
+            sample_latents = sample(trainer.model_ema, n=4, steps=128, num_classes=num_classes, device=device)
+            # Decode using VAE
+            sample_pixels = vae.decode(sample_latents / 0.18215).sample
+            # Save progress image
+            utils.save_image(sample_pixels, f"vis_epoch_{epoch+1}.png", nrow=2, normalize=True, value_range=(-1, 1))
+            print(f"Visualization saved: vis_epoch_{epoch+1}.png")
+        
+        # Save a backup of the weights every epoch (overwrites to save space)
+        torch.save(trainer.model_ema.state_dict(), "latest_model.pt")
 
     # 5. Generate and Decode Real Images
     print("\nGenerating Samples...")
