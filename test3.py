@@ -4,11 +4,14 @@ import torch.nn.functional as F
 import numpy as np
 import copy
 import math
+from torchvision.utils import save_image
+
 
 # ==========================================
 # 1. MODEL ARCHITECTURE: DiT (Diffusion Transformer)
 # Matches "DiT-B" specified in Section 5.1 [cite: 209]
 # ==========================================
+
 
 class TimestepEmbedder(nn.Module):
     """
@@ -41,6 +44,7 @@ class TimestepEmbedder(nn.Module):
         t_emb = self.mlp(t_freq)
         return t_emb
 
+
 class DiTBlock(nn.Module):
     """
     Standard DiT Block with Adaptive Layer Norm (adaLN).
@@ -65,19 +69,20 @@ class DiTBlock(nn.Module):
 
     def forward(self, x, c):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=1)
-        
+
         # Self-Attention
         x_norm = self.norm1(x)
         x_norm = x_norm * (1 + scale_msa.unsqueeze(1)) + shift_msa.unsqueeze(1)
         attn_out, _ = self.attn(x_norm, x_norm, x_norm)
         x = x + gate_msa.unsqueeze(1) * attn_out
-        
+
         # MLP
         x_norm = self.norm2(x)
         x_norm = x_norm * (1 + scale_mlp.unsqueeze(1)) + shift_mlp.unsqueeze(1)
         mlp_out = self.mlp(x_norm)
         x = x + gate_mlp.unsqueeze(1) * mlp_out
         return x
+
 
 class FinalLayer(nn.Module):
     """
@@ -99,19 +104,20 @@ class FinalLayer(nn.Module):
         x = self.linear(x)
         return x
 
+
 class ShortcutDiT(nn.Module):
     """
     The full Shortcut Model architecture.
     Conditions on: Latents x_t, Timestep t, Step-size d, Class label y.
     """
-    def __init__(self, 
-                 input_size=32,    # Latent size (e.g. 256/8 = 32) 
+    def __init__(self,
+                 input_size=32,    # Latent size (e.g. 256/8 = 32)
                  patch_size=2,     #
                  in_channels=4,    # VAE latent channels
                  hidden_size=768,  # DiT-B Hidden Size
                  depth=12,         # DiT-B Layers
                  num_heads=12,     # DiT-B Heads
-                 num_classes=1000, # ImageNet classes
+                 num_classes=1000,  # ImageNet classes
                  learn_sigma=False):
         super().__init__()
         self.in_channels = in_channels
@@ -125,8 +131,8 @@ class ShortcutDiT(nn.Module):
 
         # Condition Embeddings
         self.t_embedder = TimestepEmbedder(hidden_size)
-        self.d_embedder = TimestepEmbedder(hidden_size) # Extra embedding for step size 'd' [cite: 39]
-        self.y_embedder = nn.Embedding(num_classes + 1, hidden_size) # +1 for null class (CFG)
+        self.d_embedder = TimestepEmbedder(hidden_size)  # Extra embedding for step size 'd' [cite: 39]
+        self.y_embedder = nn.Embedding(num_classes + 1, hidden_size)  # +1 for null class (CFG)
 
         # Transformer Blocks
         self.blocks = nn.ModuleList([
@@ -169,8 +175,8 @@ class ShortcutDiT(nn.Module):
         y: (N,) tensor of class labels
         """
         # 1. Patchify
-        x = self.x_embedder(x) # (N, C, H, W) -> (N, Hidden, H/p, W/p)
-        x = x.flatten(2).transpose(1, 2) # (N, L, Hidden)
+        x = self.x_embedder(x)  # (N, C, H, W) -> (N, Hidden, H/p, W/p)
+        x = x.flatten(2).transpose(1, 2)  # (N, L, Hidden)
         x = x + self.pos_embed
 
         # 2. Combine Conditioning
@@ -195,6 +201,7 @@ class ShortcutDiT(nn.Module):
 # 2. TRAINING LOGIC (Matches Algorithm 1)
 # ==========================================
 
+
 class ShortcutTrainer:
     def __init__(self, model, device, lr=1e-4, weight_decay=0.1, m_steps=128):
         self.model = model.to(device)
@@ -202,8 +209,8 @@ class ShortcutTrainer:
         # Weight decay is crucial for stability [cite: 176]
         self.optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
         self.device = device
-        self.M = m_steps 
-        self.cfg_dropout = 0.1 # "Class Dropout Probability 0.1"
+        self.M = m_steps
+        self.cfg_dropout = 0.1  # "Class Dropout Probability 0.1"
         self.num_classes = model.y_embedder.num_embeddings - 1
 
     def update_ema(self, decay=0.999):
@@ -242,7 +249,7 @@ class ShortcutTrainer:
 
             t_fm = torch.rand(x1_fm.size(0), device=self.device)
             xt_fm = (1 - t_fm.view(-1, 1, 1, 1)) * x0_fm + t_fm.view(-1, 1, 1, 1) * x1_fm
-            target_fm = x1_fm - x0_fm # Flow matching target v_t = x1 - x0 [cite: 61]
+            target_fm = x1_fm - x0_fm  # Flow matching target v_t = x1 - x0 [cite: 61]
 
             d_zeros = torch.zeros_like(t_fm)
             pred_fm = self.model(xt_fm, t_fm, d_zeros, y_fm)
@@ -257,9 +264,9 @@ class ShortcutTrainer:
             y_sc = y_input[:k_split]
 
             # Sample step size d (power of 2)
-            max_power = int(np.log2(self.M)) 
-            powers = torch.randint(0, max_power, (k_split,), device=self.device) 
-            delta = (2 ** powers).float() / self.M 
+            max_power = int(np.log2(self.M))
+            powers = torch.randint(0, max_power, (k_split,), device=self.device)
+            delta = (2 ** powers).float() / self.M
 
             # Discrete time sampling [cite: 181]
             max_steps = (self.M // (2 ** powers))
@@ -301,6 +308,7 @@ class ShortcutTrainer:
 # 3. SAMPLING (Algorithm 2 with CFG)
 # ==========================================
 
+
 def sample(model, n_samples, steps, num_classes, device, image_size=32, in_channels=4, cfg_scale=1.5):
     """
     Algorithm 2: Sampling with Classifier-Free Guidance.
@@ -309,8 +317,8 @@ def sample(model, n_samples, steps, num_classes, device, image_size=32, in_chann
     """
     model.eval()
     x = torch.randn(n_samples, in_channels, image_size, image_size).to(device)
-    y = torch.randint(0, num_classes, (n_samples,), device=device) # Random classes
-    y_null = torch.full_like(y, num_classes) # Null tokens
+    y = torch.randint(0, num_classes, (n_samples,), device=device)  # Random classes
+    y_null = torch.full_like(y, num_classes)  # Null tokens
 
     d_val = 1.0 / steps
     t_curr = 0.0
@@ -323,7 +331,7 @@ def sample(model, n_samples, steps, num_classes, device, image_size=32, in_chann
         # "At d -> 0, the shortcut is equivalent to the flow" [cite: 104]
         # In code, we usually pass 0 if d is the minimum unit.
         d_input = d_tensor.clone()
-        if steps == 128: # Assuming 128 is M
+        if steps == 128:  # Assuming 128 is M
             d_input[:] = 0.0
 
         with torch.no_grad():
@@ -344,25 +352,26 @@ def sample(model, n_samples, steps, num_classes, device, image_size=32, in_chann
 # 4. EXECUTION
 # ==========================================
 
+
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     # Initialize model with DiT-B config (approximate for demo)
     # Note: input_size=32 corresponds to 256x256 image latents (downsampling 8)
-    model = ShortcutDiT(input_size=32, hidden_size=384, depth=4, num_heads=6).to(device) 
+    model = ShortcutDiT(input_size=32, hidden_size=384, depth=4, num_heads=6).to(device)
     # (Reduced size for CPU/Colab testing; Use hidden=768, depth=12 for full DiT-B)
-    
+
     trainer = ShortcutTrainer(model, device)
 
     # Mock Data (Simulating Latents from VAE)
-    # "All runs use the latent space of the sd-vae-ft-mse autoencoder" 
+    # "All runs use the latent space of the sd-vae-ft-mse autoencoder"
     print("Training on mock latent data...")
     for step in range(100):
         # Batch of 64 latents (4 channels, 32x32 spatial)
-        mock_x1 = torch.randn(64, 4, 32, 32) 
+        mock_x1 = torch.randn(64, 4, 32, 32)
         mock_y = torch.randint(0, 1000, (64,))
-        
+
         loss = trainer.train_step(mock_x1, mock_y)
         if step % 20 == 0:
             print(f"Step {step}: Loss {loss:.4f}")
@@ -371,7 +380,22 @@ if __name__ == "__main__":
     # "Shortcut models... produce high-quality samples in a single... step" [cite: 13]
     samples_1step = sample(trainer.model_ema, n_samples=4, steps=1, num_classes=1000, device=device, cfg_scale=1.0)
     print("1-Step Generation Complete. Shape:", samples_1step.shape)
-    
+
     print("\nGenerating 128-step sample...")
     samples_128step = sample(trainer.model_ema, n_samples=4, steps=128, num_classes=1000, device=device, cfg_scale=1.5)
     print("128-Step Generation Complete. Shape:", samples_128step.shape)
+    out_1step = (samples_1step + 1) / 2
+    out_1step = out_1step.clamp(0, 1)
+
+    save_image(out_1step, "shortcut_1step.png", nrow=2)
+    print("1-Step image saved as shortcut_1step.png")
+
+    print("\nGenerating 128-step sample...")
+    samples_128step = sample(trainer.model_ema, n_samples=4, steps=128, num_classes=1000, device=device, cfg_scale=1.5)
+
+    # Rescale and save
+    out_128step = (samples_128step + 1) / 2
+    out_128step = out_128step.clamp(0, 1)
+
+    save_image(out_128step, "shortcut_128step.png", nrow=2)
+    print("128-Step image saved as shortcut_128step.png")
