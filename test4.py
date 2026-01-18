@@ -4,10 +4,11 @@ import torch.nn.functional as F
 import numpy as np
 import copy
 import math
+import matplotlib.pyplot as plt
 import os
 from torchvision import datasets, transforms, utils
 from torch.utils.data import DataLoader
-from diffusers.models import AutoencoderKL  # For real image encoding/decoding
+from diffusers.models import AutoencoderKL
 
 
 # ==========================================
@@ -221,7 +222,7 @@ if __name__ == "__main__":
     DATA_PATH = "data"
     if os.path.exists(DATA_PATH):
         full_dataset = datasets.ImageFolder(DATA_PATH, transform=transform)
-        target_classes = full_dataset.classes[:1]
+        target_classes = full_dataset.classes[1]
         # Create a mapping of class names to their original indices
         class_to_idx = {cls: i for i, cls in enumerate(full_dataset.classes) if cls in target_classes}
         # Filter samples: only keep images if their folder (label) is in our first 10
@@ -246,7 +247,10 @@ if __name__ == "__main__":
 
     # 4. Training Loop
     print("Starting Training...")
-    for epoch in range(70):
+    epoch_losses = []
+    for epoch in range(250):
+        total_epoch_loss = 0
+        num_batches = 0
         for i, (images, labels) in enumerate(loader):
             images = images.to(device)
 
@@ -254,9 +258,16 @@ if __name__ == "__main__":
             with torch.no_grad():
                 latents = vae.encode(images).latent_dist.sample() * 0.18215
             loss = trainer.train_step(latents, labels)
+            total_epoch_loss += loss
+            num_batches += 1
+
             if i % 5 == 0:
                 print(f"Epoch {epoch}, Batch {i}, Loss: {loss:.4f}")
 
+        avg_loss = total_epoch_loss / num_batches
+        epoch_losses.append(avg_loss)
+
+        print(f"Epoch {epoch} Average Loss: {avg_loss:.4f}")
         model.eval()  # Set to eval mode for sampling
         with torch.no_grad():
             # Sample 4 images (128-step for best quality)
@@ -287,6 +298,17 @@ if __name__ == "__main__":
         utils.save_image(imgs_1s, "shortcut_1step.png", nrow=2, normalize=True, value_range=(-1, 1))
         utils.save_image(imgs_128s, "shortcut_128step.png", nrow=2, normalize=True, value_range=(-1, 1))
         print("Images saved: shortcut_1step.png and shortcut_128step.png")
+
+    print("Saving Loss Plot...")
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, 251), epoch_losses, marker='o', label='Training Loss')
+    plt.title('Training Loss per Epoch')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.grid(True)
+    plt.legend()
+    plt.savefig('training_loss_plot.png')  # <--- Saves the plot
+    print("Loss plot saved as training_loss_plot.png")
 
     # 6. Save the model weights
     model_path = "shortcut_dit_model.pt"
