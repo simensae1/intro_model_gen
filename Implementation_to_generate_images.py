@@ -217,10 +217,10 @@ if __name__ == "__main__":
         transforms.Normalize([0.5], [0.5])
     ])
 
-    DATA_PATH = "carbonara"
+    DATA_PATH = "intro_model_gen/data"
     if os.path.exists(DATA_PATH):
         full_dataset = datasets.ImageFolder(DATA_PATH, transform=transform)
-        target_classes = full_dataset.classes[1]
+        target_classes = full_dataset.classes[0]
         class_to_idx = {cls: i for i, cls in enumerate(full_dataset.classes) if cls in target_classes}
         filtered_samples = [
             (path, label) for path, label in full_dataset.samples
