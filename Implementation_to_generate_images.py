@@ -13,7 +13,7 @@ from diffusers.models import AutoencoderKL
 
 # ==========================================
 
-# 1. MODEL ARCHITECTURE (Shortcut DiT)
+# MODEL ARCHITECTURE (Shortcut DiT)
 
 # ==========================================
 
@@ -118,7 +118,7 @@ class ShortcutDiT(nn.Module):
 
 
 # ==========================================
-# 2. TRAINING LOGIC
+#  TRAINING 
 # ==========================================
 
 
@@ -175,7 +175,7 @@ class ShortcutTrainer:
         return loss_total.item()
 
 # ==========================================
-# 3. SAMPLING
+# SAMPLING
 # ==========================================
 
 
@@ -199,7 +199,7 @@ def sample(model, n, steps, num_classes, device, cfg=1.5):
     return x
 
 # ==========================================
-# 4. EXECUTION WITH REAL DATA
+# EXECUTION WITH REAL DATA
 # ==========================================
 
 
@@ -210,7 +210,6 @@ if __name__ == "__main__":
     vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").to(device)
     vae.eval()
     # 2. Setup Real Data Pipeline
-    # Replace 'path/to/images' with your actual image folder
     transform = transforms.Compose([
         transforms.Resize(256),
         transforms.CenterCrop(256),
@@ -218,14 +217,11 @@ if __name__ == "__main__":
         transforms.Normalize([0.5], [0.5])
     ])
 
-    # Using a placeholder path - Change this to your dataset location
-    DATA_PATH = "data"
+    DATA_PATH = "carbonara"
     if os.path.exists(DATA_PATH):
         full_dataset = datasets.ImageFolder(DATA_PATH, transform=transform)
         target_classes = full_dataset.classes[1]
-        # Create a mapping of class names to their original indices
         class_to_idx = {cls: i for i, cls in enumerate(full_dataset.classes) if cls in target_classes}
-        # Filter samples: only keep images if their folder (label) is in our first 10
         filtered_samples = [
             (path, label) for path, label in full_dataset.samples
             if full_dataset.classes[label] in target_classes
@@ -278,7 +274,7 @@ if __name__ == "__main__":
             utils.save_image(sample_pixels, f"vis_epoch_{epoch+1}.png", nrow=2, normalize=True, value_range=(-1, 1))
             print(f"Visualization saved: vis_epoch_{epoch+1}.png")
         
-        # Save a backup of the weights every epoch (overwrites to save space)
+        # Save a backup of the weights every epoch 
         torch.save(trainer.model_ema.state_dict(), "latest_model.pt")
 
     # 5. Generate and Decode Real Images
@@ -307,7 +303,7 @@ if __name__ == "__main__":
     plt.ylabel('Loss')
     plt.grid(True)
     plt.legend()
-    plt.savefig('training_loss_plot.png')  # <--- Saves the plot
+    plt.savefig('training_loss_plot.png')  
     print("Loss plot saved as training_loss_plot.png")
 
     # 6. Save the model weights
